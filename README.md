@@ -4,7 +4,7 @@ Machine learning classification project for detecting fraudulent credit card tra
 
 ## Overview
 
-This project addresses the challenge of fraud detection in highly imbalanced datasets where only 0.17% of transactions are fraudulent (577:1 imbalance ratio). Through advanced techniques including synthetic oversampling and gradient boosting, the model achieves 92% fraud detection rate with 84% precision.
+This project addresses the challenge of fraud detection in highly imbalanced datasets where only 0.17% of transactions are fraudulent (577:1 imbalance ratio). Through advanced techniques including synthetic oversampling and gradient boosting, the model achieves approximately 82% fraud detection rate with 95% precision at the F1-optimal threshold.
 
 ## Dataset
 
@@ -36,8 +36,8 @@ The project is organized into phases covering the complete ML workflow:
 - Proved that 99.9% accuracy can coexist with poor fraud detection
 
 **Baseline Results:**
-- Logistic Regression: 61% recall, 88% precision
-- Decision Tree: 80% recall, 81% precision
+- Logistic Regression: 63% recall, 83% precision
+- Decision Tree: 73% recall, 69% precision
 
 ### Imbalance Handling
 **File:** `imbalance_handling.ipynb`
@@ -47,7 +47,7 @@ The project is organized into phases covering the complete ML workflow:
 - SMOTE (Synthetic Minority Over-sampling Technique)
 - SMOTE + Tomek Links
 
-**Best Technique:** SMOTE (PR-AUC: 0.85, Recall: 91%)
+**Best Technique:** SMOTE (PR-AUC: 0.72, Recall: 92%)
 
 ### Advanced Optimization
 **File:** `advanced_models.ipynb`
@@ -71,41 +71,41 @@ The project is organized into phases covering the complete ML workflow:
 
 ## Results
 
-### Final Model Performance
+### Final Model Performance (F1-Optimal Threshold = 0.96)
 
 | Metric | Value |
 |--------|-------|
-| **Recall (Fraud Detection Rate)** | 92% |
-| **Precision** | 84% |
+| **Recall (Fraud Detection Rate)** | 82% |
+| **Precision** | 95% |
 | **F1-Score** | 88% |
-| **PR-AUC** | 0.90 |
-| **False Alarm Rate** | 0.03% |
+| **PR-AUC** | 0.86 |
+| **False Alarm Rate** | 0.007% |
 
-### Confusion Matrix (Optimized Threshold)
+### Confusion Matrix (F1-Optimal Threshold)
 ```
               Predicted
            Normal   Fraud
-Actual N   56,847    17
-       F        7    91
+Actual N   56,860     4
+       F       18    80
 ```
 
 **Interpretation:**
-- Catching 91 out of 98 frauds (92.9% detection rate)
-- Only 7 frauds missed (7.1% miss rate)
-- 17 false alarms (0.03% of normal transactions)
+- Catching 80 out of 98 frauds (81.6% detection rate)
+- Only 18 frauds missed (18.4% miss rate)
+- 4 false alarms (0.007% of normal transactions)
 
 ### Business Impact
 
-**Cost Analysis:**
-- Missed frauds: 7 × $100 = $700
-- False alarms: 17 × $10 = $170
-- Total cost: $870 per 56,962 transactions
+**Cost Analysis (Cost-Optimal Threshold):**
+- Missed frauds: 18 × $100 = $1,800
+- False alarms: 4 × $10 = $40
+- Total cost: $1,760 per 56,962 transactions (after TP reward)
 
 **Baseline Comparison:**
-- Baseline cost (Phase 2): $3,940
-- Optimized cost: $870
-- **Savings: $3,070 per test set**
-- **Projected: $53,900 annual savings per 1M transactions**
+- Baseline cost (default threshold): $2,062
+- Optimized cost: $1,760
+- **Savings: $302 per test set**
+- **Projected: ~$5,302 annual savings per 1M transactions**
 
 ## Key Techniques
 
@@ -117,11 +117,11 @@ Actual N   56,847    17
 ### Model Optimization
 - Tested 54 hyperparameter combinations
 - Selection prioritized recall with minimum 70% precision
-- 5-fold stratified cross-validation
+- Best config: scale_pos_weight=3.0, max_depth=6, learning_rate=0.12
 
 ### Threshold Optimization
 - Default 0.5 threshold is arbitrary for imbalanced data
-- Optimal threshold (0.30-0.35) maximizes F1-score
+- F1-optimal threshold at 0.96 maximizes F1-score
 - Cost-optimal threshold minimizes business losses
 
 ## Technologies
@@ -142,7 +142,6 @@ Actual N   56,847    17
 - Threshold tuning
 
 ## Installation
-
 ```bash
 pip install numpy pandas scikit-learn xgboost imbalanced-learn matplotlib seaborn jupyter
 ```
@@ -150,13 +149,13 @@ pip install numpy pandas scikit-learn xgboost imbalanced-learn matplotlib seabor
 ## Usage
 
 1. **Download Dataset**
-   ```bash
+```bash
    # Download creditcard.csv from Kaggle
    # Place in project directory
-   ```
+```
 
 2. **Run Notebooks Sequentially**
-   ```bash
+```bash
    jupyter notebook
    # Open and run:
    # 1. problem_framing.ipynb
@@ -164,7 +163,7 @@ pip install numpy pandas scikit-learn xgboost imbalanced-learn matplotlib seabor
    # 3. baselinemodeling.ipynb
    # 4. imbalance_handling.ipynb
    # 5. advanced_models.ipynb (Phases 4-6)
-   ```
+```
 
 ## Key Learnings
 
@@ -175,7 +174,7 @@ A model predicting all transactions as "Normal" achieves 99.83% accuracy but cat
 Default ML algorithms fail on 577:1 imbalance. SMOTE combined with XGBoost's scale_pos_weight dramatically improves minority class detection.
 
 ### 3. Threshold Optimization Matters
-Default 0.5 threshold ignores class imbalance and business costs. Optimizing threshold from 0.5 to 0.35 improves performance and reduces business losses.
+Default 0.5 threshold ignores class imbalance and business costs. Optimizing threshold to 0.96 (F1-optimal) improves performance and reduces business losses.
 
 ### 4. Business Costs Drive Decisions
 Cost-sensitive evaluation reveals that optimizing for metrics alone misses business value. Incorporating $100 FN vs $10 FP costs changes optimal threshold selection.
