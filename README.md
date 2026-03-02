@@ -19,7 +19,7 @@ This project addresses the challenge of fraud detection in highly imbalanced dat
 
 The project is organized into phases covering the complete ML workflow:
 
-### Phase 1: Problem Framing & EDA
+### Problem Framing & EDA
 **File:** `problem_framing.ipynb`, `eda_&_preprocessing.ipynb`
 
 - Dataset exploration and feature analysis
@@ -27,7 +27,7 @@ The project is organized into phases covering the complete ML workflow:
 - Feature correlation analysis (V17, V14, V12 identified as top predictors)
 - Demonstrated why accuracy is misleading for imbalanced data
 
-### Phase 2: Baseline Modeling
+### Baseline Modeling
 **File:** `baselinemodeling.ipynb`
 
 - Logistic Regression and Decision Tree baselines
@@ -39,7 +39,7 @@ The project is organized into phases covering the complete ML workflow:
 - Logistic Regression: 61% recall, 88% precision
 - Decision Tree: 80% recall, 81% precision
 
-### Phase 3: Imbalance Handling
+### Imbalance Handling
 **File:** `imbalance_handling.ipynb`
 
 - Class weighting
@@ -49,22 +49,22 @@ The project is organized into phases covering the complete ML workflow:
 
 **Best Technique:** SMOTE (PR-AUC: 0.85, Recall: 91%)
 
-### Phase 4-6: Advanced Optimization
+### Advanced Optimization
 **File:** `advanced_models.ipynb`
 
-**Phase 4: XGBoost Training**
+**XGBoost Training**
 - SMOTE oversampling applied to training set
 - Hyperparameter tuning across 54 configurations
 - Cross-validation for robust evaluation
 - Feature importance analysis
 
-**Phase 5: Threshold Optimization**
+**Threshold Optimization**
 - Systematic sweep of 99 thresholds (0.01 to 0.99)
 - F1-optimal threshold identification
 - High-recall threshold analysis
 - Precision-recall trade-off visualization
 
-**Phase 6: Cost-Sensitive Evaluation**
+**Cost-Sensitive Evaluation**
 - Business cost matrix: $100 per missed fraud, $10 per false alarm
 - Cost-optimal threshold calculation
 - ROI quantification and business impact analysis
