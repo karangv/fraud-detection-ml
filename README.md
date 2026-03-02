@@ -75,7 +75,7 @@ The project is organized into phases covering the complete ML workflow:
 
 | Metric | Value |
 |--------|-------|
-| **Recall (Fraud Detection Rate)** | 82% |
+| **Recall (Fraud Detection Rate)** | 81% |
 | **Precision** | 95% |
 | **F1-Score** | 88% |
 | **PR-AUC** | 0.86 |
@@ -178,14 +178,6 @@ Default 0.5 threshold ignores class imbalance and business costs. Optimizing thr
 
 ### 4. Business Costs Drive Decisions
 Cost-sensitive evaluation reveals that optimizing for metrics alone misses business value. Incorporating $100 FN vs $10 FP costs changes optimal threshold selection.
-
-## Future Enhancements
-
-- Probability calibration (Platt scaling, isotonic regression)
-- SHAP explainability for model interpretability
-- FastAPI deployment for real-time predictions
-- Streamlit dashboard for business users
-- Model monitoring and drift detection
 
 ## Author
 
