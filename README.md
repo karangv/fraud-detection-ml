@@ -162,7 +162,7 @@ pip install numpy pandas scikit-learn xgboost imbalanced-learn matplotlib seabor
    # 2. eda_&_preprocessing.ipynb
    # 3. baselinemodeling.ipynb
    # 4. imbalance_handling.ipynb
-   # 5. advanced_models.ipynb (Phases 4-6)
+   # 5. advanced_models.ipynb
 ```
 
 ## Key Learnings
