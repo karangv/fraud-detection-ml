@@ -4,7 +4,7 @@ Machine learning classification project for detecting fraudulent credit card tra
 
 ## Overview
 
-This project addresses the challenge of fraud detection in highly imbalanced datasets where only 0.17% of transactions are fraudulent (577:1 imbalance ratio). Through advanced techniques including synthetic oversampling and gradient boosting, the model achieves approximately 82% fraud detection rate with 95% precision at the F1-optimal threshold.
+This project addresses the challenge of fraud detection in highly imbalanced datasets where only 0.17% of transactions are fraudulent (577:1 imbalance ratio). Through advanced techniques including synthetic oversampling and gradient boosting, the model achieves approximately 81% fraud detection rate with 95% precision at the F1-optimal threshold.
 
 ## Dataset
 
