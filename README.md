@@ -1,183 +1,148 @@
 # Credit Card Fraud Detection
 
-Machine learning classification project for detecting fraudulent credit card transactions using XGBoost, SMOTE, and cost-sensitive threshold optimization.
+Detects fraudulent credit card transactions with XGBoost, SMOTE and a decision threshold tuned against a business cost matrix. Raw data goes in; a trained model, test metrics and a scoring command come out.
 
 ## Overview
 
-This project addresses the challenge of fraud detection in highly imbalanced datasets where only 0.17% of transactions are fraudulent (577:1 imbalance ratio). Through advanced techniques including synthetic oversampling and gradient boosting, the model achieves approximately 81% fraud detection rate with 95% precision at the F1-optimal threshold.
+Only 0.17% of transactions in this dataset are fraud (a 577:1 imbalance). On the held-out test set, the model catches 80.6% of fraud with 91.9% precision at the threshold chosen on the validation split. PR-AUC is 0.867.
 
 ## Dataset
 
-**Source:** [Kaggle Credit Card Fraud Detection](https://www.kaggle.com/mlg-ulb/creditcardfraud)
+[Kaggle Credit Card Fraud Detection](https://www.kaggle.com/mlg-ulb/creditcardfraud): 284,807 transactions, 492 of them fraud. There are 30 features: Time, Amount and the PCA components V1 to V28.
 
-- **Transactions:** 284,807
-- **Features:** 30 (Time, V1-V28 PCA components, Amount)
-- **Frauds:** 492 (0.173%)
-- **Imbalance Ratio:** 577:1
+## Running the pipeline
 
-## Project Structure
+You need Python 3.12 or newer.
 
-The project is organized into phases covering the complete ML workflow:
+```bash
+python -m venv .venv
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+pip install -e .
+```
 
-### Problem Framing & EDA
-**File:** `problem_framing.ipynb`, `eda_&_preprocessing.ipynb`
+Put `creditcard.csv` in `data/`. If it isn't there, kagglehub downloads it.
 
-- Dataset exploration and feature analysis
-- Class imbalance quantification (577:1 ratio)
-- Feature correlation analysis (V17, V14, V12 identified as top predictors)
-- Demonstrated why accuracy is misleading for imbalanced data
+```bash
+make train evaluate
+make predict INPUT=new.csv OUTPUT=scored.csv
+make test
+```
 
-### Baseline Modeling
-**File:** `baselinemodeling.ipynb`
+`make train` took about 27 minutes on 12 cores. To try a smaller run, shrink `param_grid` in `config.yaml`. Windows doesn't ship with make (`winget install ezwinports.make` adds it), and the commands behind the targets work on their own:
 
-- Logistic Regression and Decision Tree baselines
-- Stratified train-test split (80/20)
-- Confusion matrix analysis
-- Proved that 99.9% accuracy can coexist with poor fraud detection
+```bash
+python -m fraud.train    --config config.yaml
+python -m fraud.evaluate --config config.yaml
+python -m fraud.predict  --config config.yaml --input new.csv --output scored.csv
+```
 
-**Baseline Results:**
-- Logistic Regression: 63% recall, 83% precision
-- Decision Tree: 73% recall, 69% precision
+`predict` needs the 30 feature columns, in any order, and ignores any other column, including `Class`. It writes `fraud_probability` and `is_fraud` for each input row, in the same order.
 
-### Imbalance Handling
-**File:** `imbalance_handling.ipynb`
+`config.yaml` holds the data path, seed, split sizes, parameter grid, selection metric, threshold strategy (`cost` or `f1`), cost matrix and artifact directory.
 
-- Class weighting
-- Random undersampling
-- SMOTE (Synthetic Minority Over-sampling Technique)
-- SMOTE + Tomek Links
+Training writes to `artifacts/`, which git ignores:
 
-**Best Technique:** SMOTE (PR-AUC: 0.72, Recall: 92%)
+| File | Contents |
+|------|----------|
+| `model.joblib` | Fitted pipeline: StandardScaler, SMOTE, XGBoost |
+| `threshold.json` | Chosen threshold, strategy, cost matrix, validation metrics at that threshold |
+| `cv_results.csv` | Every config tried, ranked by CV score |
+| `metrics.json` | Test metrics at 0.5 and at the chosen threshold, written by `evaluate` |
 
-### Advanced Optimization
-**File:** `advanced_models.ipynb`
+### How the data is used
 
-**XGBoost Training**
-- SMOTE oversampling applied to training set
-- Hyperparameter tuning across 54 configurations
-- Cross-validation for robust evaluation
-- Feature importance analysis
+The data is split 60/20/20 with stratification and a fixed seed. Each split has one job:
 
-**Threshold Optimization**
-- Systematic sweep of 99 thresholds (0.01 to 0.99)
-- F1-optimal threshold identification
-- High-recall threshold analysis
-- Precision-recall trade-off visualization
+| Split | Used for |
+|-------|----------|
+| Train | 5-fold grid search over 54 configs, then fitting the final model |
+| Validation | Choosing the decision threshold |
+| Test | Final metrics, in `evaluate` only |
 
-**Cost-Sensitive Evaluation**
-- Business cost matrix: $100 per missed fraud, $10 per false alarm
-- Cost-optimal threshold calculation
-- ROI quantification and business impact analysis
+SMOTE sits inside the pipeline, so it only runs on training folds. It never touches validation, test or inference data. If you change the config because of what `metrics.json` says, the test split no longer gives an unbiased estimate.
+
+## Project layout
+
+```
+config.yaml
+src/fraud/    config, data, costs, pipeline, train, evaluate, predict
+tests/        pytest suite on synthetic data, no download needed
+notebooks/    the original analysis
+```
+
+The notebooks cover problem framing, EDA, baseline models and a comparison of imbalance techniques. They are kept as a record of how the approach was chosen, and the numbers printed in them come from an earlier method. The results below come from the pipeline.
 
 ## Results
 
-### Final Model Performance (F1-Optimal Threshold = 0.96)
+Test set: 56,962 transactions, 98 of them fraud. PR-AUC is 0.867 and ROC-AUC is 0.981 at any threshold.
 
-| Metric | Value |
-|--------|-------|
-| **Recall (Fraud Detection Rate)** | 81% |
-| **Precision** | 95% |
-| **F1-Score** | 88% |
-| **PR-AUC** | 0.86 |
-| **False Alarm Rate** | 0.007% |
+| Metric | Chosen threshold (0.94) | Default threshold (0.5) |
+|--------|-------------------------|-------------------------|
+| Recall | 80.6% | 84.7% |
+| Precision | 91.9% | 78.3% |
+| F1 | 85.9% | 81.4% |
+| False-alarm rate | 0.012% | 0.040% |
+| Total cost | $1,891 | $1,647 |
 
-### Confusion Matrix (F1-Optimal Threshold)
+Confusion matrix at the chosen threshold:
+
 ```
               Predicted
            Normal   Fraud
-Actual N   56,860     4
-       F       18    80
+Actual N   56,857       7
+       F       19      79
 ```
 
-**Interpretation:**
-- Catching 80 out of 98 frauds (81.6% detection rate)
-- Only 18 frauds missed (18.4% miss rate)
-- 4 false alarms (0.007% of normal transactions)
+Confusion matrix at the default threshold:
 
-### Business Impact
+```
+              Predicted
+           Normal   Fraud
+Actual N   56,841      23
+       F       15      83
+```
 
-**Cost Analysis (Cost-Optimal Threshold):**
-- Missed frauds: 18 × $100 = $1,800
-- False alarms: 4 × $10 = $40
-- Total cost: $1,760 per 56,962 transactions (after TP reward)
+### Business impact
 
-**Baseline Comparison:**
-- Baseline cost (default threshold): $2,062
-- Optimized cost: $1,760
-- **Savings: $302 per test set**
-- **Projected: ~$5,302 annual savings per 1M transactions**
+Each missed fraud costs $100 and each false alarm costs $10. Each caught fraud earns back $1.
 
-## Key Techniques
+| Threshold | Missed frauds | False alarms | Caught frauds | Total |
+|-----------|---------------|--------------|---------------|-------|
+| 0.94 (chosen) | 19 × $100 = $1,900 | 7 × $10 = $70 | 79 × -$1 = -$79 | $1,891 |
+| 0.5 (default) | 15 × $100 = $1,500 | 23 × $10 = $230 | 83 × -$1 = -$83 | $1,647 |
 
-### Imbalance Handling
-- **SMOTE:** Balances training data from 577:1 to 1:1 ratio
-- **scale_pos_weight:** XGBoost parameter weighting fraud samples higher
-- Combined approach for optimal minority class learning
+The tuned threshold lowered false alarms but cost $244 more than the default on this test set, or about $4,284 per million transactions. It was the cheapest threshold on validation and didn't hold up on test. With about 100 frauds in each split, one extra missed fraud moves the total by $101, so this comparison is noisy in both directions.
 
-### Model Optimization
-- Tested 54 hyperparameter combinations
-- Selection prioritized recall with minimum 70% precision
-- Best config: scale_pos_weight=3.0, max_depth=6, learning_rate=0.12
+## Key techniques
 
-### Threshold Optimization
-- Default 0.5 threshold is arbitrary for imbalanced data
-- F1-optimal threshold at 0.96 maximizes F1-score
-- Cost-optimal threshold minimizes business losses
+SMOTE balances the training data from 577:1 to 1:1. XGBoost's `scale_pos_weight` then adds further weight to the fraud class.
+
+Configs are ranked by mean PR-AUC across the CV folds. Ties go to the lower standard deviation, then to the smaller parameter values. The best config is `scale_pos_weight=3.0`, `max_depth=8`, `learning_rate=0.1`, with a CV PR-AUC of 0.855. The grid doesn't separate configs by much: all 54 score between 0.842 and 0.855, and the standard deviation across folds is about 0.08.
+
+The threshold sweep tries 0.01 to 0.99 in steps of 0.01 on the validation split and keeps the lowest-cost value. Set `threshold_strategy: f1` to maximize F1 instead.
 
 ## Technologies
 
-**Languages & Libraries:**
-- Python 3.8+
-- XGBoost 1.7+
-- scikit-learn 1.3+
-- imbalanced-learn 0.11+
-- Pandas, NumPy
-- Matplotlib, Seaborn
+Python, XGBoost, scikit-learn, imbalanced-learn, pandas and NumPy, with matplotlib and seaborn in the notebooks. `requirements.txt` has the exact versions.
 
-**ML Techniques:**
-- Gradient Boosting (XGBoost)
-- Synthetic oversampling (SMOTE)
-- Cross-validation
-- Hyperparameter optimization
-- Threshold tuning
+## Key learnings
 
-## Installation
-```bash
-pip install numpy pandas scikit-learn xgboost imbalanced-learn matplotlib seaborn jupyter
-```
+### Accuracy is misleading
 
-## Usage
+A model that calls every transaction normal scores 99.83% accuracy and catches no fraud. PR-AUC is a better measure on data this imbalanced.
 
-1. **Download Dataset**
-```bash
-   # Download creditcard.csv from Kaggle
-   # Place in project directory
-```
+### Imbalance needs handling
 
-2. **Run Notebooks Sequentially**
-```bash
-   jupyter notebook
-   # Open and run:
-   # 1. problem_framing.ipynb
-   # 2. eda_&_preprocessing.ipynb
-   # 3. baselinemodeling.ipynb
-   # 4. imbalance_handling.ipynb
-   # 5. advanced_models.ipynb
-```
+SMOTE and `scale_pos_weight` both make fraud count for more during training. SMOTE has to stay inside the training folds, because synthetic rows in a validation fold would inflate its score.
 
-## Key Learnings
+### Higher precision doesn't always mean lower cost
 
-### 1. Accuracy is Misleading
-A model predicting all transactions as "Normal" achieves 99.83% accuracy but catches zero frauds. PR-AUC is the appropriate metric for imbalanced classification.
+Moving from 0.5 to 0.94 raised precision from 78.3% to 91.9%, and F1 from 81.4% to 85.9%. It also missed 4 more frauds, which outweighed the 16 fewer false alarms at these costs.
 
-### 2. Imbalance Requires Special Handling
-Default ML algorithms fail on 577:1 imbalance. SMOTE combined with XGBoost's scale_pos_weight dramatically improves minority class detection.
+### A threshold needs enough positives behind it
 
-### 3. Threshold Optimization Matters
-Default 0.5 threshold ignores class imbalance and business costs. Optimizing threshold to 0.96 (F1-optimal) improves performance and reduces business losses.
-
-### 4. Business Costs Drive Decisions
-Cost-sensitive evaluation reveals that optimizing for metrics alone misses business value. Incorporating $100 FN vs $10 FP costs changes optimal threshold selection.
+Choosing the threshold on validation gives an honest test score, and that score can come back worse than the default. About 100 validation frauds aren't enough to tell two thresholds apart reliably.
 
 ## Author
 
