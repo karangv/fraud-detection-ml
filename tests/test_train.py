@@ -118,8 +118,8 @@ def test_out_of_fold_scores_match_a_manual_loop(trained, transactions):
 def test_saved_threshold_comes_from_out_of_fold_scores(trained, transactions):
     train_df, val, _ = split_data(transactions, trained.split, trained.seed)
     rows = pd.concat([train_df, val])
-    best_config = pd.read_csv(trained.artifact_dir / "cv_results.csv").iloc[0]
-    best_params = {name: best_config[name].item() for name in trained.param_grid}
+    results = pd.read_csv(trained.artifact_dir / "cv_results.csv")
+    best_params = {name: results.loc[0, name].item() for name in trained.param_grid}
     params = {**trained.xgb_params, **best_params}
 
     proba = out_of_fold_proba(rows[FEATURE_COLUMNS], rows["Class"], params, trained)
