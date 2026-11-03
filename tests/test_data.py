@@ -60,6 +60,18 @@ def test_validate_rejects_non_finite(transactions, value):
         validate_features(bad)
 
 
+def test_load_dataset_drops_exact_duplicates(config_path, transactions):
+    near_copy = transactions.iloc[[1]].assign(Time=123.0)
+    with_copies = pd.concat([transactions, transactions.iloc[[0, 0, 5]], near_copy])
+    with_copies.to_csv(config_path.parent / "transactions.csv", index=False)
+
+    loaded = load_dataset(load_config(config_path))
+
+    assert len(loaded) == len(transactions) + 1
+    assert not loaded.duplicated().any()
+    assert loaded.index.tolist() == list(range(len(loaded)))
+
+
 def test_load_dataset_requires_binary_target(config_path, transactions):
     transactions.assign(Class=2).to_csv(config_path.parent / "transactions.csv", index=False)
     with pytest.raises(ValueError, match="Class"):

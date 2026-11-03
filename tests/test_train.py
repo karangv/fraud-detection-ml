@@ -98,7 +98,7 @@ def test_test_rows_have_no_effect_on_training(trained, transactions):
     # Class is untouched, so the split stays the same and only the test features change.
     _, _, test = split_data(transactions, trained.split, trained.seed)
     tampered = transactions.copy()
-    tampered.loc[test.index, FEATURE_COLUMNS] = 1000.0
+    tampered.loc[test.index, FEATURE_COLUMNS] *= 1000
     tampered.to_csv(trained.data_path, index=False)
     train(trained)
 

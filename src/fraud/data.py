@@ -36,14 +36,17 @@ def _dataset_path(cfg: Config) -> Path:
 
 
 def load_dataset(cfg: Config) -> pd.DataFrame:
-    """Load the labelled dataset and check its schema."""
+    """Load the labelled dataset, check its schema and drop exact duplicate rows."""
     df = pd.read_csv(_dataset_path(cfg))
     validate_features(df)
     if TARGET_COLUMN not in df.columns:
         raise ValueError(f"missing columns: {TARGET_COLUMN}")
     if not df[TARGET_COLUMN].isin([0, 1]).all():
         raise ValueError(f"{TARGET_COLUMN} must only contain 0 and 1")
-    return df
+    # A copy on each side of a random split lets the model score rows it has already seen.
+    deduped = df.drop_duplicates(ignore_index=True)
+    print(f"dropped {len(df) - len(deduped):,} duplicate rows")
+    return deduped
 
 
 def split_data(
