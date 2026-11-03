@@ -1,16 +1,19 @@
-"""Grid search on train, pick a threshold on val, save the artifacts.
+"""Grid search on train, pick a threshold on train+val, save the artifacts.
 
-The test split is never used here. fraud.evaluate scores it afterwards.
+The threshold comes from out-of-fold scores, so every row is scored by a model
+that didn't train on it. The test split is never used here. fraud.evaluate
+scores it afterwards.
 """
 
 import argparse
 import json
+from typing import Any
 
 import joblib
 import numpy as np
 import pandas as pd
 from sklearn.metrics import make_scorer, precision_recall_curve
-from sklearn.model_selection import GridSearchCV, StratifiedKFold
+from sklearn.model_selection import GridSearchCV, StratifiedKFold, cross_val_predict
 
 from fraud.config import Config, load_config
 from fraud.costs import sweep_thresholds
@@ -45,13 +48,17 @@ def rank_configs(results: pd.DataFrame, param_names: list[str]) -> pd.DataFrame:
     return ranked.assign(rank=range(1, len(ranked) + 1))
 
 
+def _folds(cfg: Config) -> StratifiedKFold:
+    return StratifiedKFold(cfg.cv_folds, shuffle=True, random_state=cfg.seed)
+
+
 def grid_search(X: pd.DataFrame, y: pd.Series, cfg: Config) -> pd.DataFrame:
     """Cross-validate every config in the grid and return them ranked."""
     search = GridSearchCV(
         build_pipeline(cfg.xgb_params, cfg.seed, cfg.smote_k_neighbors),
         param_grid={f"xgb__{name}": values for name, values in cfg.param_grid.items()},
         scoring=_scorer(cfg),
-        cv=StratifiedKFold(cfg.cv_folds, shuffle=True, random_state=cfg.seed),
+        cv=_folds(cfg),
         refit=False,
         n_jobs=cfg.cv_n_jobs,
         verbose=1,
@@ -65,23 +72,37 @@ def grid_search(X: pd.DataFrame, y: pd.Series, cfg: Config) -> pd.DataFrame:
     return rank_configs(results, list(cfg.param_grid))
 
 
+def out_of_fold_proba(
+    X: pd.DataFrame, y: pd.Series, params: dict[str, Any], cfg: Config
+) -> np.ndarray:
+    """Fraud probability for each row, from a model fit on the other folds."""
+    pipeline = build_pipeline(params, cfg.seed, cfg.smote_k_neighbors)
+    proba = cross_val_predict(
+        pipeline, X, y, cv=_folds(cfg), method="predict_proba", n_jobs=cfg.cv_n_jobs
+    )
+    return proba[:, 1]
+
+
 def train(cfg: Config) -> None:
     train_df, val_df, _ = split_data(load_dataset(cfg), cfg.split, cfg.seed)
     X_train, y_train = train_df[FEATURE_COLUMNS], train_df[TARGET_COLUMN]
-    X_val, y_val = val_df[FEATURE_COLUMNS], val_df[TARGET_COLUMN]
     print(f"train: {len(train_df):,} rows, {y_train.sum()} frauds")
-    print(f"val:   {len(val_df):,} rows, {y_val.sum()} frauds")
+    print(f"val:   {len(val_df):,} rows, {val_df[TARGET_COLUMN].sum()} frauds")
 
     results = grid_search(X_train, y_train, cfg)
     best_params = {name: results.loc[0, name].item() for name in cfg.param_grid}
     print(f"best config: {best_params}, CV {cfg.selection_metric} {results.loc[0, 'mean_cv_score']:.4f}")
 
-    model = build_pipeline({**cfg.xgb_params, **best_params}, cfg.seed, cfg.smote_k_neighbors)
-    model.fit(X_train, y_train)
+    params = {**cfg.xgb_params, **best_params}
+    train_val = pd.concat([train_df, val_df])
+    X_train_val, y_train_val = train_val[FEATURE_COLUMNS], train_val[TARGET_COLUMN]
 
-    val_proba = model.predict_proba(X_val)[:, 1]
-    best, _ = sweep_thresholds(y_val, val_proba, cfg.costs, cfg.threshold_strategy)
+    oof_proba = out_of_fold_proba(X_train_val, y_train_val, params, cfg)
+    best, _ = sweep_thresholds(y_train_val, oof_proba, cfg.costs, cfg.threshold_strategy)
     print(f"threshold ({cfg.threshold_strategy}): {best['threshold']:.2f}")
+
+    model = build_pipeline(params, cfg.seed, cfg.smote_k_neighbors)
+    model.fit(X_train_val, y_train_val)
 
     cfg.artifact_dir.mkdir(parents=True, exist_ok=True)
     joblib.dump(model, cfg.artifact_dir / MODEL_FILE)
@@ -92,7 +113,7 @@ def train(cfg: Config) -> None:
                 "threshold": best["threshold"],
                 "strategy": cfg.threshold_strategy,
                 "cost_matrix": cfg.costs,
-                "val_metrics": best,
+                "oof_metrics": best,
             },
             indent=2,
         )

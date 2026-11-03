@@ -3,13 +3,15 @@ import json
 import numpy as np
 import pandas as pd
 import pytest
+from imblearn.over_sampling import SMOTE
+from sklearn.model_selection import StratifiedKFold
 
 from fraud.config import load_config
-from fraud.costs import threshold_metrics
+from fraud.costs import sweep_thresholds, threshold_metrics
 from fraud.data import FEATURE_COLUMNS, split_data
 from fraud.evaluate import evaluate
-from fraud.pipeline import load_artifacts
-from fraud.train import rank_configs, recall_at_precision, train
+from fraud.pipeline import build_pipeline, load_artifacts
+from fraud.train import out_of_fold_proba, rank_configs, recall_at_precision, train
 
 
 def test_rank_prefers_higher_score():
@@ -78,16 +80,69 @@ def test_cv_results_lists_every_config(trained):
     assert results["mean_cv_score"].is_monotonic_decreasing
 
 
-def test_threshold_is_chosen_on_the_validation_split(trained, transactions):
+def test_threshold_is_chosen_on_train_and_val(trained, transactions):
     saved = json.loads((trained.artifact_dir / "threshold.json").read_text())
     assert saved["strategy"] == "cost"
     assert saved["cost_matrix"] == trained.costs
-    assert saved["threshold"] == saved["val_metrics"]["threshold"]
+    assert saved["threshold"] == saved["oof_metrics"]["threshold"]
 
-    _, val, _ = split_data(transactions, trained.split, trained.seed)
-    matrix = saved["val_metrics"]["confusion_matrix"]
-    assert sum(matrix.values()) == len(val)
-    assert matrix["tp"] + matrix["fn"] == val["Class"].sum()
+    train_df, val, _ = split_data(transactions, trained.split, trained.seed)
+    matrix = saved["oof_metrics"]["confusion_matrix"]
+    assert sum(matrix.values()) == len(train_df) + len(val)
+    assert matrix["tp"] + matrix["fn"] == train_df["Class"].sum() + val["Class"].sum()
+
+
+def test_final_model_is_fit_on_train_and_val(trained, transactions):
+    model, _ = load_artifacts(trained.artifact_dir)
+    train_df, val, _ = split_data(transactions, trained.split, trained.seed)
+    assert model.named_steps["scale"].n_samples_seen_ == len(train_df) + len(val)
+
+
+def test_out_of_fold_scores_match_a_manual_loop(trained, transactions):
+    train_df, val, _ = split_data(transactions, trained.split, trained.seed)
+    rows = pd.concat([train_df, val])
+    X, y = rows[FEATURE_COLUMNS], rows["Class"]
+    params = {**trained.xgb_params, "max_depth": 2, "learning_rate": 0.1}
+
+    expected = np.empty(len(rows))
+    for fit_rows, score_rows in StratifiedKFold(
+        trained.cv_folds, shuffle=True, random_state=trained.seed
+    ).split(X, y):
+        fold = build_pipeline(params, trained.seed, trained.smote_k_neighbors)
+        fold.fit(X.iloc[fit_rows], y.iloc[fit_rows])
+        expected[score_rows] = fold.predict_proba(X.iloc[score_rows])[:, 1]
+
+    assert out_of_fold_proba(X, y, params, trained) == pytest.approx(expected)
+
+
+def test_saved_threshold_comes_from_out_of_fold_scores(trained, transactions):
+    train_df, val, _ = split_data(transactions, trained.split, trained.seed)
+    rows = pd.concat([train_df, val])
+    best_config = pd.read_csv(trained.artifact_dir / "cv_results.csv").iloc[0]
+    best_params = {name: best_config[name].item() for name in trained.param_grid}
+    params = {**trained.xgb_params, **best_params}
+
+    proba = out_of_fold_proba(rows[FEATURE_COLUMNS], rows["Class"], params, trained)
+    expected, _ = sweep_thresholds(rows["Class"], proba, trained.costs, trained.threshold_strategy)
+
+    saved = json.loads((trained.artifact_dir / "threshold.json").read_text())
+    assert saved["oof_metrics"] == expected
+
+
+def test_out_of_fold_scores_keep_smote_in_the_training_folds(trained, transactions, monkeypatch):
+    train_df, val, _ = split_data(transactions, trained.split, trained.seed)
+    rows = pd.concat([train_df, val])
+    seen = []
+    original = SMOTE.fit_resample
+
+    def spy(self, X, y, **kwargs):
+        seen.append(len(X))
+        return original(self, X, y, **kwargs)
+
+    monkeypatch.setattr(SMOTE, "fit_resample", spy)
+    params = {**trained.xgb_params, "max_depth": 2}
+    out_of_fold_proba(rows[FEATURE_COLUMNS], rows["Class"], params, trained)
+    assert seen == [len(rows) // 2, len(rows) // 2]
 
 
 def test_test_rows_have_no_effect_on_training(trained, transactions):
