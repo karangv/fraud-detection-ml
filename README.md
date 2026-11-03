@@ -4,11 +4,13 @@ Detects fraudulent credit card transactions with XGBoost, SMOTE and a decision t
 
 ## Overview
 
-Only 0.17% of transactions in this dataset are fraud (a 577:1 imbalance). On the held-out test set, the model catches 80.6% of fraud with 91.9% precision at the threshold chosen on the validation split. PR-AUC is 0.867.
+Only 0.17% of transactions in this dataset are fraud (a 577:1 imbalance). On the held-out test set, the model catches 78.9% of fraud with 67.6% precision at the threshold chosen by cost. PR-AUC is 0.804.
 
 ## Dataset
 
 [Kaggle Credit Card Fraud Detection](https://www.kaggle.com/mlg-ulb/creditcardfraud): 284,807 transactions, 492 of them fraud. There are 30 features: Time, Amount and the PCA components V1 to V28.
+
+The pipeline drops 1,081 exact duplicate rows before splitting, which leaves 283,726 rows and 473 frauds.
 
 ## Running the pipeline
 
@@ -29,7 +31,7 @@ make predict INPUT=new.csv OUTPUT=scored.csv
 make test
 ```
 
-`make train` took about 27 minutes on 12 cores. To try a smaller run, shrink `param_grid` in `config.yaml`. Windows doesn't ship with make (`winget install ezwinports.make` adds it), and the commands behind the targets work on their own:
+`make train` took about 20 minutes on 12 cores. To try a smaller run, shrink `param_grid` in `config.yaml`. Windows doesn't ship with make (`winget install ezwinports.make` adds it), and the commands behind the targets work on their own:
 
 ```bash
 python -m fraud.train    --config config.yaml
@@ -46,21 +48,21 @@ Training writes to `artifacts/`, which git ignores:
 | File | Contents |
 |------|----------|
 | `model.joblib` | Fitted pipeline: StandardScaler, SMOTE, XGBoost |
-| `threshold.json` | Chosen threshold, strategy, cost matrix, validation metrics at that threshold |
+| `threshold.json` | Chosen threshold, strategy, cost matrix, out-of-fold metrics at that threshold |
 | `cv_results.csv` | Every config tried, ranked by CV score |
 | `metrics.json` | Test metrics at 0.5 and at the chosen threshold, written by `evaluate` |
 
 ### How the data is used
 
-The data is split 60/20/20 with stratification and a fixed seed. Each split has one job:
+The data is split 60/20/20 with stratification and a fixed seed:
 
-| Split | Used for |
-|-------|----------|
-| Train | 5-fold grid search over 54 configs, then fitting the final model |
-| Validation | Choosing the decision threshold |
+| Rows | Used for |
+|------|----------|
+| Train | 5-fold grid search over 54 configs |
+| Train + validation | Choosing the decision threshold from out-of-fold scores, then fitting the final model |
 | Test | Final metrics, in `evaluate` only |
 
-SMOTE sits inside the pipeline, so it only runs on training folds. It never touches validation, test or inference data. If you change the config because of what `metrics.json` says, the test split no longer gives an unbiased estimate.
+Out-of-fold scoring means each row gets its score from a model that didn't train on it, so the threshold can use all 378 frauds in train and validation. SMOTE sits inside the pipeline, so it only runs on training folds and never touches held-out, test or inference data. If you change the config because of what `metrics.json` says, the test split no longer gives an unbiased estimate.
 
 ## Project layout
 
@@ -75,23 +77,23 @@ The notebooks cover problem framing, EDA, baseline models and a comparison of im
 
 ## Results
 
-Test set: 56,962 transactions, 98 of them fraud. PR-AUC is 0.867 and ROC-AUC is 0.981 at any threshold.
+Test set: 56,746 transactions, 95 of them fraud. PR-AUC is 0.804 and ROC-AUC is 0.972 at any threshold.
 
-| Metric | Chosen threshold (0.94) | Default threshold (0.5) |
+| Metric | Chosen threshold (0.27) | Default threshold (0.5) |
 |--------|-------------------------|-------------------------|
-| Recall | 80.6% | 84.7% |
-| Precision | 91.9% | 78.3% |
-| F1 | 85.9% | 81.4% |
-| False-alarm rate | 0.012% | 0.040% |
-| Total cost | $1,891 | $1,647 |
+| Recall | 78.9% | 77.9% |
+| Precision | 67.6% | 75.5% |
+| F1 | 72.8% | 76.7% |
+| False-alarm rate | 0.064% | 0.042% |
+| Total cost | $2,285 | $2,266 |
 
 Confusion matrix at the chosen threshold:
 
 ```
               Predicted
            Normal   Fraud
-Actual N   56,857       7
-       F       19      79
+Actual N   56,615      36
+       F       20      75
 ```
 
 Confusion matrix at the default threshold:
@@ -99,8 +101,8 @@ Confusion matrix at the default threshold:
 ```
               Predicted
            Normal   Fraud
-Actual N   56,841      23
-       F       15      83
+Actual N   56,627      24
+       F       21      74
 ```
 
 ### Business impact
@@ -109,18 +111,18 @@ Each missed fraud costs $100 and each false alarm costs $10. Each caught fraud e
 
 | Threshold | Missed frauds | False alarms | Caught frauds | Total |
 |-----------|---------------|--------------|---------------|-------|
-| 0.94 (chosen) | 19 × $100 = $1,900 | 7 × $10 = $70 | 79 × -$1 = -$79 | $1,891 |
-| 0.5 (default) | 15 × $100 = $1,500 | 23 × $10 = $230 | 83 × -$1 = -$83 | $1,647 |
+| 0.27 (chosen) | 20 × $100 = $2,000 | 36 × $10 = $360 | 75 × -$1 = -$75 | $2,285 |
+| 0.5 (default) | 21 × $100 = $2,100 | 24 × $10 = $240 | 74 × -$1 = -$74 | $2,266 |
 
-The tuned threshold lowered false alarms but cost $244 more than the default on this test set, or about $4,284 per million transactions. It was the cheapest threshold on validation and didn't hold up on test. With about 100 frauds in each split, one extra missed fraud moves the total by $101, so this comparison is noisy in both directions.
+The two thresholds roughly tie. The tuned one catches 1 more fraud and raises 12 more false alarms, for a total of $19 more than the default on this test set, or about $335 per million transactions. One missed fraud moves the total by $101, so tuning the threshold shows no saving here.
 
 ## Key techniques
 
 SMOTE balances the training data from 577:1 to 1:1. XGBoost's `scale_pos_weight` then adds further weight to the fraud class.
 
-Configs are ranked by mean PR-AUC across the CV folds. Ties go to the lower standard deviation, then to the smaller parameter values. The best config is `scale_pos_weight=3.0`, `max_depth=8`, `learning_rate=0.1`, with a CV PR-AUC of 0.855. The grid doesn't separate configs by much: all 54 score between 0.842 and 0.855, and the standard deviation across folds is about 0.08.
+Configs are ranked by mean PR-AUC across the CV folds. Ties go to the lower standard deviation, then to the smaller parameter values. The best config is `scale_pos_weight=6.0`, `max_depth=8`, `learning_rate=0.12`, with a CV PR-AUC of 0.837. The grid doesn't separate configs by much: all 54 score between 0.825 and 0.837, and the standard deviation across folds is about 0.07.
 
-The threshold sweep tries 0.01 to 0.99 in steps of 0.01 on the validation split and keeps the lowest-cost value. Set `threshold_strategy: f1` to maximize F1 instead.
+The threshold sweep tries 0.01 to 0.99 in steps of 0.01 on the out-of-fold scores and keeps the lowest-cost value. Set `threshold_strategy: f1` to maximize F1 instead.
 
 ## Technologies
 
@@ -136,13 +138,13 @@ A model that calls every transaction normal scores 99.83% accuracy and catches n
 
 SMOTE and `scale_pos_weight` both make fraud count for more during training. SMOTE has to stay inside the training folds, because synthetic rows in a validation fold would inflate its score.
 
-### Higher precision doesn't always mean lower cost
+### Duplicates flatter a random split
 
-Moving from 0.5 to 0.94 raised precision from 78.3% to 91.9%, and F1 from 81.4% to 85.9%. It also missed 4 more frauds, which outweighed the 16 fewer false alarms at these costs.
+A row copied into both train and test gets scored by a model that has already seen it. This dataset has 1,081 exact duplicates, so they are removed before splitting.
 
-### A threshold needs enough positives behind it
+### Threshold tuning has to earn its place
 
-Choosing the threshold on validation gives an honest test score, and that score can come back worse than the default. About 100 validation frauds aren't enough to tell two thresholds apart reliably.
+Tuned on out-of-fold scores, the cost-optimal threshold (0.27) came within $19 of the default 0.5 on test, and its F1 was lower at 72.8% against 76.7%. At these costs, the threshold moves the total far less than the model's missed frauds do: those alone account for $2,000 of the $2,285.
 
 ## Author
 
